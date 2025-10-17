@@ -3,7 +3,7 @@
 import { ExtensionMessage } from '../types';
 
 /**
- * Send message to background script
+ * Send message to background script. If code is run in a popup, it is automatically sent to the background
  */
 export const sendToBackground = (message: ExtensionMessage): Promise<any> => {
   return new Promise((resolve, reject) => {
