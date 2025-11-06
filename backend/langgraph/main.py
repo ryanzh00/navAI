@@ -1,5 +1,11 @@
 # pip install fastapi uvicorn langgraph langchain langchain-openai langchain-community chromadb tiktoken langchain-mcp-adapters
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from typing import List, TypedDict
 from typing_extensions import Annotated
 from fastapi import FastAPI
@@ -22,7 +28,7 @@ SQLITE_URL = "sqlite:///memory.sqlite"
 CHROMA_DIR = "chroma"
 
 # ===== Vector Store (long-term, cross-thread) =====
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 emb = OpenAIEmbeddings()  # requires OPENAI_API_KEY in env
 vstore = Chroma(collection_name="memories", embedding_function=emb, persist_directory=CHROMA_DIR)
 
@@ -63,7 +69,7 @@ def reply_node(state: ChatState, *, user_id: str) -> ChatState:
 
 # ===== MCP node (OpenAI tools agent) =====
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain.agents import create_openai_tools_agent, AgentExecutor
+from langchain.agents import create_agent
 
 async def mcp_node(state: ChatState) -> ChatState:
     """
@@ -90,26 +96,24 @@ async def mcp_node(state: ChatState) -> ChatState:
 
     tools_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You may call tools to complete the user's request. Prefer minimal steps; stop when done."),
-        ("placeholder", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
-    ])
-
     async with MultiServerMCPClient(servers, **client_kwargs) as client:
         tools = await client.get_tools()  # MCP → LangChain Tool objects
 
-        agent = create_openai_tools_agent(tools_llm, tools, prompt)
-        executor = AgentExecutor(
-            agent=agent,
+        # Use langchain 1.0+ create_agent API
+        agent = create_agent(
+            model=tools_llm,
             tools=tools,
-            max_iterations=10,
-            verbose=True,
-            handle_parsing_errors=True,
+            system_prompt="You may call tools to complete the user's request. Prefer minimal steps; stop when done."
         )
-        result = await executor.ainvoke({"input": user_text})
+        
+        # Invoke the agent directly (it's already a compiled graph)
+        result = await agent.ainvoke({"messages": [HumanMessage(content=user_text)]})
 
-    final_text = result.get("output", str(result))
+    # Extract the final AI message
+    final_messages = result.get("messages", [])
+    final_ai_message = next((m for m in reversed(final_messages) if isinstance(m, AIMessage)), None)
+    final_text = final_ai_message.content if final_ai_message else str(result)
+    
     return {"messages": [AIMessage(content=final_text)]}
 
 def trim_node(state: ChatState) -> ChatState:
