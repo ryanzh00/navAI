@@ -115,7 +115,7 @@ const App: React.FC = () => {
           value={state.message}
           onChange={handleMessageChange}
           onKeyPress={handleKeyPress}
-          placeholder="Type message here..."
+          placeholder="Type your message here..."
           className="message-input"
           disabled={!state.isConnected}
         />
