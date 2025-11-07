@@ -1,6 +1,7 @@
-# pip install fastapi uvicorn langgraph langchain langchain-openai langchain-community chromadb tiktoken langchain-mcp-adapters
+# pip install fastapi uvicorn langgraph langchain langchain-openai langchain-community chromadb tiktoken langchain-mcp-adapters python-dotenv langchain-chroma
 
 import os
+import asyncio
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -9,7 +10,7 @@ load_dotenv()
 
 from typing import List, TypedDict
 from typing_extensions import Annotated
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from langchain_core.messages import AnyMessage, HumanMessage, AIMessage, SystemMessage
@@ -29,16 +30,11 @@ TOP_K = 4
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQLITE_URL = os.path.join(BASE_DIR, "memory.sqlite")
 CHROMA_DIR = os.path.join(BASE_DIR, "chroma")
-
-# Playwright MCP Configuration
-# Set to True to use Chrome Extension mode (connects to user's browser)
-# Set to False to use stdio mode (launches separate browser)
-USE_CHROME_EXTENSION = os.getenv("USE_CHROME_EXTENSION", "false").lower() == "true"
-# WebSocket endpoint from Chrome Extension (default: ws://localhost:9223/extension)
-CHROME_EXTENSION_WS_URL = os.getenv("CHROME_EXTENSION_WS_URL", "ws://localhost:9223/extension")
+NPM = os.getenv("NPM_BIN", "/opt/homebrew/bin/npx")  # adjust if needed
 
 # ===== Vector Store (long-term, cross-thread) =====
 from langchain_chroma import Chroma
+
 emb = OpenAIEmbeddings()  # requires OPENAI_API_KEY in env
 vstore = Chroma(collection_name="memories", embedding_function=emb, persist_directory=CHROMA_DIR)
 
@@ -79,121 +75,104 @@ def reply_node(state: ChatState, *, user_id: str) -> ChatState:
 
 # ===== MCP node (OpenAI tools agent) =====
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain.agents import create_agent
 
-# Global MCP client to maintain persistent connection across tool calls
-_mcp_client = None
+# Global, long-lived MCP client and tools (keep them alive for the whole app lifetime)
+_mcp_client: MultiServerMCPClient | None = None
+_mcp_session = None
 _mcp_tools = None
 
 async def get_mcp_client_and_tools():
-    """Get or create persistent MCP client and tools"""
+    """
+    Return the cached MCP client and tools.
+    They are initialized in the lifespan context.
+    """
     global _mcp_client, _mcp_tools
-    
     if _mcp_client is None or _mcp_tools is None:
-        # Configure MCP server based on mode
-        if USE_CHROME_EXTENSION:
-            # Chrome Extension mode: Playwright MCP connects to Chrome Extension via CDP
-            # The Chrome Extension must be installed and running
-            # Use --extension flag to connect to running browser extension
-            servers = {
-                "playwright": {
-                    "transport": "stdio",
-                    "command": "npx",
-                    "args": [
-                        "-y", 
-                        "@playwright/mcp",
-                        "--extension"
-                    ],
-                    "env": {
-                        "PLAYWRIGHT_MCP_EXTENSION_TOKEN": "XzBiEfI8PhLZYGXTlCMgrmjin_7tX8N1OCA_a5nXHIs"
-                    }
-                }
-            }
-        else:
-            # Stdio mode: Launch separate browser instance (default)
-            servers = {
-                "playwright": {
-                    "transport": "stdio",
-                    "command": "npx",
-                    "args": ["-y", "@playwright/mcp"],  
-                }
-            }
-        
-        _mcp_client = MultiServerMCPClient(connections=servers)
-        _mcp_tools = await _mcp_client.get_tools()
-        print(f"[DEBUG] Created new MCP client with {len(_mcp_tools)} tools")
-    
+        raise RuntimeError("MCP client not initialized. Application startup may have failed.")
     return _mcp_client, _mcp_tools
+
+async def navigate_to_home():
+    """
+    Navigate the headed Playwright MCP browser to https://www.google.com.
+    Requires MCP client to have been initialized.
+    """
+    global _mcp_tools
+    # Ensure MCP tools exist
+    if not _mcp_tools:
+        raise RuntimeError("MCP tools not available")
+
+    # Find the browser_navigate tool
+    nav_tool = next((t for t in _mcp_tools if "browser_navigate" in t.name.lower()), None)
+    if not nav_tool:
+        raise RuntimeError(f"browser_navigate tool not found. Available tools: {[t.name for t in _mcp_tools]}")
+
+    # Invoke navigation
+    result = await nav_tool.ainvoke({"url": "https://www.google.com"})
+    print("[DEBUG] Navigated to Google.com via MCP")
+    return result
+
+async def keep_mcp_alive():
+    """Periodically interact with MCP to keep the subprocess alive"""
+    global _mcp_tools
+    while True:
+        try:
+            await asyncio.sleep(30)  # Every 30 seconds
+            # Try to list tabs to keep connection active
+            list_tool = next((t for t in _mcp_tools if "tabs" in t.name.lower()), None)
+            if list_tool:
+                result = await list_tool.ainvoke({})
+                print(f"[DEBUG] Keep-alive ping sent, got: {len(str(result))} chars")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[DEBUG] Keep-alive error (continuing): {e}")
 
 async def mcp_node(state: ChatState) -> ChatState:
     """
-    MCP node that uses Playwright for browser automation.
-    Supports two modes:
-    1. Chrome Extension mode: Connects to user's Chrome browser via CDP (preserves session)
-    2. Stdio mode: Launches separate browser instance (no session)
+    MCP node that uses Playwright for browser automation (headed).
+    Uses a persistent MCP client so the window remains open between calls.
     """
+    global _mcp_client, _mcp_tools
+    
+    # Get user text
     last_user = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
     user_text = (last_user.content if last_user else "").strip()
     if not user_text:
         return {"messages": [AIMessage(content="(no user message to act on)")]}
-    
+
     tools_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    # Get persistent MCP client and tools (reuses connection across calls)
-    client, tools = await get_mcp_client_and_tools()
-    
-    # Debug: Log available tools
-    print(f"\n[DEBUG] Available MCP tools: {[tool.name for tool in tools]}\n")
-    
-    # Debug: Show snapshot tool details if available
-    snapshot_tool = next((t for t in tools if "snapshot" in t.name.lower() or "capture" in t.name.lower()), None)
-    if snapshot_tool:
-        print(f"[DEBUG] Snapshot tool found: {snapshot_tool.name}")
-        print(f"[DEBUG] Snapshot tool description: {snapshot_tool.description[:200]}...")
-
-    # Use langchain 1.0+ create_agent API
     # Enhanced system prompt to ensure proper Playwright workflow
     agent = create_agent(
         model=tools_llm,
-        tools=tools,
+        tools=_mcp_tools,
         system_prompt="""You are a browser automation assistant using Playwright MCP.
 
-CRITICAL WORKFLOW - FOLLOW EXACTLY:
-1. Navigate to a page using browser_navigate
-2. ALWAYS call browser_snapshot IMMEDIATELY after navigation (in the same tool call batch if possible)
-3. Wait for page load if needed using browser_wait_for BEFORE capturing snapshot
-4. Analyze the snapshot returned by browser_snapshot to find elements
-5. Use element references (ref) IMMEDIATELY after browser_snapshot - call browser_click right away
+RULES:
+- If there are no open pages or the URL is about:blank, call browser_navigate first.
+- After any navigation, call browser_wait_for (time=3000ms) before snapshot.
+- ALWAYS call browser_snapshot right before interacting so refs are fresh.
+- Immediately use refs from the most recent browser_snapshot with browser_click/browser_type.
+- Do not reuse old refs after a new snapshot.
 
-CRITICAL RULES ABOUT REFS AND TIMING:
-- Element references (ref) are ONLY valid immediately after the browser_snapshot call
-- You MUST call browser_click/browser_type/etc. IMMEDIATELY after browser_snapshot
-- Do NOT wait or do other operations between browser_snapshot and browser_click
-- Each browser_snapshot call generates NEW refs (e.g., e2, e3, e58)
-- NEVER reuse refs from browser_navigate response - they are invalid
-- ALWAYS find the element in the most recent browser_snapshot response
-- Look for the element text/description in the snapshot YAML, then use its ref IMMEDIATELY
-
-WORKFLOW (CRITICAL TIMING): 
-1. Navigate → browser_navigate
-2. Wait (if needed) → browser_wait_for
-3. Capture → browser_snapshot (get fresh refs)
-4. IMMEDIATELY Parse → Find element in snapshot YAML (look for "Sign in", "Log in", etc.)
-5. IMMEDIATELY Extract → Get the ref from that element (e.g., ref=e58)
-6. IMMEDIATELY Interact → Call browser_click with that ref RIGHT AWAY
-
-TIMING IS CRITICAL: Call browser_click immediately after browser_snapshot returns. Do not delay."""
+TYPICAL PLAN:
+1) browser_tabs list → optionally select a tab
+2) (if needed) browser_navigate
+3) browser_wait_for (3000)
+4) browser_snapshot
+5) Interact using refs (browser_click, browser_type, etc.)
+6) If page changes, repeat wait → snapshot → interact.
+"""
     )
-    
-    # Invoke the agent with streaming to see step-by-step execution
+
+    # Execute and stream logs to server stdout (optional)
     try:
         print(f"\n[DEBUG] Starting agent execution for: {user_text}\n")
-        
-        # Use astream to see step-by-step execution and collect final result
         messages_so_far = [HumanMessage(content=user_text)]
         result = None
         async for chunk in agent.astream({"messages": messages_so_far}):
-            # Log each step
             for key, value in chunk.items():
                 if isinstance(value, dict) and "messages" in value:
                     for msg in value["messages"]:
@@ -201,10 +180,7 @@ TIMING IS CRITICAL: Call browser_click immediately after browser_snapshot return
                         print(f"[DEBUG] Step - {msg_type}:")
                         if hasattr(msg, 'content') and msg.content:
                             content_str = str(msg.content)
-                            if len(content_str) > 300:
-                                print(f"  Content: {content_str[:300]}...")
-                            else:
-                                print(f"  Content: {content_str}")
+                            print("  Content:", (content_str[:300] + "...") if len(content_str) > 300 else content_str)
                         if hasattr(msg, 'tool_calls') and msg.tool_calls:
                             print(f"  Tool calls: {[tc.get('name', 'unknown') for tc in msg.tool_calls]}")
                             for tc in msg.tool_calls:
@@ -212,61 +188,32 @@ TIMING IS CRITICAL: Call browser_click immediately after browser_snapshot return
                                     print(f"    Args: {tc['args']}")
                         if hasattr(msg, 'tool_call_id'):
                             print(f"  Tool result (ID: {msg.tool_call_id})")
-                            # If this is a browser_snapshot result, show the full snapshot
-                            if hasattr(msg, 'content') and 'snapshot' in str(msg.content).lower():
-                                content_str = str(msg.content)
-                                # Extract and show the snapshot YAML
-                                if 'Page Snapshot:' in content_str:
-                                    snapshot_start = content_str.find('Page Snapshot:')
-                                    snapshot_end = content_str.find('```', snapshot_start + 20)
-                                    if snapshot_end == -1:
-                                        snapshot_end = len(content_str)
-                                    snapshot_section = content_str[snapshot_start:snapshot_end]
-                                    print(f"  [SNAPSHOT] Full snapshot content:\n{snapshot_section}")
-            # Keep the last chunk as result
             result = chunk
-        
-        # Debug: Log all messages to see what happened
+
         final_messages = result.get("messages", [])
         print(f"\n[DEBUG] Agent execution completed. Total messages: {len(final_messages)}")
-        for i, msg in enumerate(final_messages):
-            msg_type = type(msg).__name__
-            print(f"[DEBUG] Final Message {i}: {msg_type}")
-            if hasattr(msg, 'content'):
-                content_str = str(msg.content)
-                # Show first 500 chars for tool calls
-                if len(content_str) > 500:
-                    print(f"[DEBUG]   Content preview: {content_str[:500]}...")
-                else:
-                    print(f"[DEBUG]   Content: {content_str}")
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                print(f"[DEBUG]   Tool calls: {msg.tool_calls}")
-        
-        # Extract the final AI message
         final_ai_message = next((m for m in reversed(final_messages) if isinstance(m, AIMessage)), None)
         final_text = final_ai_message.content if final_ai_message else str(result)
-        
         return {"messages": [AIMessage(content=final_text)]}
+
     except Exception as e:
-        # Enhanced error handling with debugging info
         error_msg = str(e)
         print(f"\n[ERROR] MCP Node Error: {error_msg}")
         print(f"[ERROR] Exception type: {type(e).__name__}")
-        
-        # Try to get current page snapshot for debugging
+
+        # Try to snapshot current page for debugging
         try:
-            # Look for snapshot-related tools
-            snapshot_tool = next((t for t in tools if "snapshot" in t.name.lower() or "capture" in t.name.lower()), None)
+            snapshot_tool = next((t for t in _mcp_tools if "snapshot" in t.name.lower() or "capture" in t.name.lower()), None)
             if snapshot_tool:
                 print(f"[DEBUG] Attempting to capture snapshot for debugging...")
                 snapshot_result = await snapshot_tool.ainvoke({})
                 snapshot_str = str(snapshot_result)
                 print(f"[DEBUG] Snapshot captured ({len(snapshot_str)} chars)")
-                print(f"[DEBUG] Snapshot preview (first 2000 chars):\n{snapshot_str[:2000]}...")
+                print(f"[DEBUG] Snapshot preview (first 1500 chars):\n{snapshot_str[:1500]}...")
         except Exception as debug_error:
             print(f"[DEBUG] Could not capture snapshot: {debug_error}")
-        
-        return {"messages": [AIMessage(content=f"Error: {error_msg}. The agent may need to capture a page snapshot first before interacting with elements.")]}
+
+        return {"messages": [AIMessage(content=f"Error: {error_msg}")]}
 
 def trim_node(state: ChatState) -> ChatState:
     return {"messages": state["messages"][-WINDOW:]}
@@ -293,15 +240,16 @@ def route_message(state: ChatState) -> str:
     last_user = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
     if not last_user:
         return "reply"
-    
+
     user_text = last_user.content.lower()
     # Keywords that suggest browser automation tasks
     browser_keywords = [
-        "click", "navigate", "browser", "page", "website", "web", 
-        "screenshot", "scrape", "automate", "interact", "button", 
-        "form", "fill", "submit", "pull request", "github", "make a pr"
+        "click", "navigate", "browser", "page", "website", "web",
+        "screenshot", "scrape", "automate", "interact", "button",
+        "form", "fill", "submit", "pull request", "github", "make a pr",
+        "login", "logout", "type", "select", "tab", "snapshot"
     ]
-    
+
     if any(keyword in user_text for keyword in browser_keywords):
         return "mcp"
     return "reply"
@@ -319,8 +267,8 @@ builder.add_conditional_edges(
         "reply": "reply"
     }
 )
-builder.add_edge("mcp", "trim")  # MCP -> trim -> END
-builder.add_edge("reply", "trim")  # Reply -> trim -> END
+builder.add_edge("mcp", "trim")   # MCP -> trim -> END
+builder.add_edge("reply", "trim") # Reply -> trim -> END
 builder.add_edge("trim", END)
 
 # Initialize checkpointer and graph (will be set up in lifespan)
@@ -330,24 +278,64 @@ graph = None
 # ===== API =====
 class ChatIn(BaseModel):
     user_id: str
-    thread_id: str
+    thread_id: str  # kept for your external caller's tracking; we don't spawn per-thread browsers in this file
     message: str
+
+class OpenIn(BaseModel):
+    url: str | None = "https://github.com"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage async checkpointer lifecycle"""
-    global checkpointer, graph
-    # Enter async context manager for checkpointer
+    """Manage async checkpointer lifecycle and hold MCP client for the whole app lifetime."""
+    global checkpointer, graph, _mcp_client, _mcp_session, _mcp_tools
+    
     async with AsyncSqliteSaver.from_conn_string(SQLITE_URL) as cp:
         checkpointer = cp
-        graph = builder.compile(checkpointer=checkpointer)
-        yield  # App runs here
-    # Context manager exits here (cleanup)
+        
+        # Create MCP client
+        servers = {
+            "playwright": {
+                "transport": "stdio",
+                "command": NPM,
+                "args": ["-y", "@playwright/mcp@latest", "--user-data-dir=./mcp_data"],
+            }
+        }
+        _mcp_client = MultiServerMCPClient(connections=servers)
+        print("[DEBUG] Created MCP client")
+        
+        # Use session context to keep connection alive
+        async with _mcp_client.session("playwright") as session:
+            _mcp_session = session
+            # Load tools from session
+            _mcp_tools = await load_mcp_tools(session)
+            print(f"[DEBUG] Loaded {len(_mcp_tools)} tools from session")
+            
+            # Navigate to home to open browser window
+            await navigate_to_home()
+
+            graph = builder.compile(checkpointer=checkpointer)
+            
+            yield  # App runs here - browser stays open
+        
+        
+        # Session closes here, browser will close
 
 app = FastAPI(lifespan=lifespan)
 
+@app.post("/open")
+async def open_browser():
+    try:
+        # Browser is already open from lifespan - just navigate again if needed
+        await navigate_to_home()
+        return {"ok": True, "message": f"Headed browser is ready and showing Google."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/chat")
 async def chat(inp: ChatIn):
+    # Ensure MCP is alive
+    await get_mcp_client_and_tools()
+
     # Use ainvoke for async graph execution (required for async nodes like mcp_node)
     result = await graph.ainvoke(
         {"messages": [HumanMessage(content=inp.message)]},
@@ -365,44 +353,16 @@ async def chat(inp: ChatIn):
 
 @app.post("/debug/mcp-snapshot")
 async def debug_mcp_snapshot():
-    """Debug endpoint to capture and return current page snapshot"""
+    """Debug endpoint to capture and return current page snapshot."""
     try:
-        # Configure MCP server (use same config as mcp_node)
-        if USE_CHROME_EXTENSION:
-            servers = {
-                "playwright": {
-                    "transport": "stdio",
-                    "command": "npx",
-                    "args": ["-y", "@playwright/mcp", "--extension"],
-                    "env": {
-                        "PLAYWRIGHT_MCP_EXTENSION_TOKEN": os.getenv("PLAYWRIGHT_MCP_EXTENSION_TOKEN", "")
-                    }
-                }
-            }
-        else:
-            servers = {
-                "playwright": {
-                    "transport": "stdio",
-                    "command": "npx",
-                    "args": ["-y", "@playwright/mcp"],
-                }
-            }
-        
-        client = MultiServerMCPClient(connections=servers)
-        tools = await client.get_tools()
-        
+        await get_mcp_client_and_tools()
         # Find snapshot tool
-        snapshot_tool = next((t for t in tools if "snapshot" in t.name.lower() or "capture" in t.name.lower()), None)
-        
+        snapshot_tool = next((t for t in _mcp_tools if "snapshot" in t.name.lower() or "capture" in t.name.lower()), None)
         if not snapshot_tool:
-            return {
-                "error": "No snapshot tool found",
-                "available_tools": [t.name for t in tools]
-            }
-        
-        # Capture snapshot (tools can be called directly without session context)
+            return {"error": "No snapshot tool found", "available_tools": [t.name for t in _mcp_tools]}
+
+        # Capture snapshot
         snapshot_result = await snapshot_tool.ainvoke({})
-        
         snapshot_str = str(snapshot_result)
         return {
             "success": True,
@@ -411,9 +371,8 @@ async def debug_mcp_snapshot():
             "tool_used": snapshot_tool.name
         }
     except Exception as e:
-        return {
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
+        return {"error": str(e), "error_type": type(e).__name__}
 
-# Run: uvicorn main:app --reload
+# Run locally:
+# uvicorn main:app --host 127.0.0.1 --port 8000
+# NOTE: Avoid `--reload` if you want the headed browser to persist between edits; reload restarts the parent process, which will close the MCP child and its browser.
