@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getCurrentTab, sendToBackground } from '../shared/messaging';
 import { PopupState, UserMessage } from '../types';
-import './App.css';
 
 const App: React.FC = () => {
   const [state, setState] = useState<PopupState>({
@@ -13,7 +12,7 @@ const App: React.FC = () => {
   useEffect(() => {
     // Check connection status on mount
     checkConnection();
-    
+
     // Load saved settings
     loadSettings();
   }, []);
@@ -31,9 +30,9 @@ const App: React.FC = () => {
   const loadSettings = async () => {
     try {
       const result = await chrome.storage.local.get(['agenticMode']);
-      setState((prev: PopupState) => ({ 
-        ...prev, 
-        agenticMode: result.agenticMode || false 
+      setState((prev: PopupState) => ({
+        ...prev,
+        agenticMode: result.agenticMode || false
       }));
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -47,7 +46,7 @@ const App: React.FC = () => {
   const handleAgenticModeToggle = async () => {
     const newMode = !state.agenticMode;
     setState((prev: PopupState) => ({ ...prev, agenticMode: newMode }));
-    
+
     // Save to storage
     try {
       await chrome.storage.local.set({ agenticMode: newMode });
@@ -71,7 +70,7 @@ const App: React.FC = () => {
       console.log('Sending message to background:', message);
       await sendToBackground(message);
       console.log('Message sent to background successfully');
-      
+
       // Clear input after sending
       setState((prev: PopupState) => ({ ...prev, message: '' }));
     } catch (error) {
@@ -88,51 +87,46 @@ const App: React.FC = () => {
   return (
     <div className="app">
       <div className="header">
-        <h1>AI Desktop Assistant</h1>
-        <div className={`status ${state.isConnected ? 'connected' : 'disconnected'}`}>
-          {state.isConnected ? '🟢 Connected' : '🔴 Disconnected'}
-        </div>
+        <h1>navAI</h1>
+      </div>
+
+      <div className="chat-container">
+        {state.message && (
+          <div className="chat-message user">
+            {state.message}
+          </div>
+        )}
       </div>
 
       <div className="controls">
-        <div className="toggle-container">
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={state.agenticMode}
-              onChange={handleAgenticModeToggle}
-              className="toggle-input"
-            />
-            <span className="toggle-slider"></span>
-            Agentic Mode
-          </label>
-        </div>
+        <label className="toggle-label pretty-toggle">
+          <input
+            type="checkbox"
+            checked={state.agenticMode}
+            onChange={handleAgenticModeToggle}
+            className="toggle-input"
+          />
+          <span className="toggle-slider"></span>
+          Agentic Mode
+        </label>
       </div>
 
-      <div className="input-container">
+      <div className="input-bar">
         <input
           type="text"
           value={state.message}
           onChange={handleMessageChange}
-          onKeyPress={handleKeyPress}
-          placeholder="Type your message here..."
+          onKeyDown={handleKeyPress}
+          placeholder="Type a message..."
           className="message-input"
-          disabled={!state.isConnected}
         />
         <button
           onClick={handleSendMessage}
-          disabled={!state.message.trim() || !state.isConnected}
+          disabled={!state.message.trim()}
           className="send-button"
         >
-          Send
+          Enter
         </button>
-      </div>
-
-      <div className="info">
-        <p>Agentic Mode: {state.agenticMode ? 'ON' : 'OFF'}</p>
-        <p className="help-text">
-          Type a message and press Enter or click Send to interact with the AI assistant.
-        </p>
       </div>
     </div>
   );

@@ -3,23 +3,22 @@ import { resolve } from 'path'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  root: 'src',
   plugins: [react()],
   build: {
-    outDir: 'dist',
+    emptyOutDir: true,
+    outDir: '../dist',
     rollupOptions: {
       input: {
-        popup: resolve(__dirname, 'src/popup/main.tsx'),
+        index: resolve(__dirname, 'src/popup/popup.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts')
       },
       output: {
         entryFileNames: '[name].js',
-        chunkFileNames: '[name].js',
-        assetFileNames: '[name].[ext]'
+        assetFileNames: '[name].[ext]',
+        chunkFileNames: '[name].js'
       }
     }
-  },
-  define: {
-    'process.env': {}
   }
 })
