@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && cp manifest.json dist/ && cp popup.html dist/",
+    "build": "tsc && vite build && node scripts/copy-dist-files.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
