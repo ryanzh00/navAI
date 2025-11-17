@@ -30,7 +30,12 @@ TOP_K = 4
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQLITE_URL = os.path.join(BASE_DIR, "memory.sqlite")
 CHROMA_DIR = os.path.join(BASE_DIR, "chroma")
-NPM = os.getenv("NPM_BIN", "/opt/homebrew/bin/npx")  # adjust if needed
+if os.name == "nt":
+    # Windows: use npx from PATH, or override via NPM_BIN
+    NPM = os.getenv("NPM_BIN", "npx")
+else:
+    # macOS/Homebrew default (you can still override via NPM_BIN)
+    NPM = os.getenv("NPM_BIN", "/opt/homebrew/bin/npx")
 
 # ===== Vector Store (long-term, cross-thread) =====
 from langchain_chroma import Chroma
