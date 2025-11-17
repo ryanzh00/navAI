@@ -71,11 +71,15 @@ def reply_node(state: ChatState, *, user_id: str) -> ChatState:
     query = last_user.content if last_user else ""
     long_term = search_memories(user_id, query, k=TOP_K)
 
-    sys = [SystemMessage(content="You are a concise, helpful assistant.")]
+    sys = [SystemMessage(content="You are a concise, helpful assistant. Keep your replies short, easy to understand, and conversational. Avoid technical jargon.")]
     if long_term:
         sys.append(SystemMessage(content="Relevant long-term context:\n- " + "\n- ".join(long_term)))
 
-    ai = llm.invoke(sys + window)
+    # Prefix the user query for reply_node
+    if query:
+        query = "Take a snapshot first to understand the state of the page first. " + query
+
+    ai = llm.invoke(sys + window[:-1] + [HumanMessage(content=query)] if query else sys + window)
     return {"messages": [AIMessage(content=ai.content)]}
 
 # ===== MCP node (OpenAI tools agent) =====
@@ -147,6 +151,9 @@ async def mcp_node(state: ChatState) -> ChatState:
     if not user_text:
         return {"messages": [AIMessage(content="(no user message to act on)")]}
 
+    # Prefix the user text for mcp_node
+    user_text = "Interact with this page to " + user_text
+
     tools_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     # Enhanced system prompt to ensure proper Playwright workflow
@@ -156,19 +163,19 @@ async def mcp_node(state: ChatState) -> ChatState:
         system_prompt="""You are a browser automation assistant using Playwright MCP.
 
 RULES:
-- If there are no open pages or the URL is about:blank, call browser_navigate first.
-- After any navigation, call browser_wait_for (time=3000ms) before snapshot.
 - ALWAYS call browser_snapshot right before interacting so refs are fresh.
 - Immediately use refs from the most recent browser_snapshot with browser_click/browser_type.
 - Do not reuse old refs after a new snapshot.
 
 TYPICAL PLAN:
-1) browser_tabs list → optionally select a tab
-2) (if needed) browser_navigate
-3) browser_wait_for (3000)
+- ALWAYS call browser_snapshot right before interacting so refs are fresh.
+1) Do not reload the page before the query. Do not navigate unless the current query is to navigate. 
+2) Call browser_navigate if there are no open pages or the URL is about:blank
+3) browser_wait_for 
 4) browser_snapshot
 5) Interact using refs (browser_click, browser_type, etc.)
 6) If page changes, repeat wait → snapshot → interact.
+Keep your replies short, friendly, and easy for non-technical users to understand. Avoid technical jargon and summarize whenever possible.
 """
     )
 
