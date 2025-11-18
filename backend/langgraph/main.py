@@ -4,6 +4,8 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -333,6 +335,19 @@ async def lifespan(app: FastAPI):
         # Session closes here, browser will close
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "chrome-extension://*",       # allow extensions (dev)
+        "http://localhost:3000",      # if you ever have a dev UI
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",      # optional
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/open")
 async def open_browser():

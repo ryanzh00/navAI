@@ -1,31 +1,25 @@
-2025/11/17-15:28:45.516 5794 Creating DB C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_orange-resonance-170715.postman.co_0.indexeddb.leveldb since it was missing.
-2025/11/17-15:28:45.526 5794 Reusing MANIFEST C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_orange-resonance-170715.postman.co_0.indexeddb.leveldb/MANIFEST-000001
-2025/11/17-15:28:46.069 1d18 Level-0 table #5: started
-2025/11/17-15:28:46.073 1d18 Level-0 table #5: 7073 bytes OK
-2025/11/17-15:28:46.077 1d18 Delete type=0 #3
-2025/11/17-15:28:46.078 1d18 Manual compaction at level-0 from '\x00\x04\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x05\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/11/17-15:28:46.082 5794 Level-0 table #7: started
-2025/11/17-15:28:46.084 5794 Level-0 table #7: 1607 bytes OK
-2025/11/17-15:28:46.087 5794 Delete type=0 #4
-2025/11/17-15:28:46.087 5794 Manual compaction at level-0 from '\x00\x06\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x07\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/11/17-15:29:10.434 1d18 Level-0 table #9: started
-2025/11/17-15:29:10.439 1d18 Level-0 table #9: 3772 bytes OK
-2025/11/17-15:29:10.443 1d18 Delete type=0 #6
-2025/11/17-15:29:10.444 5794 Manual compaction at level-0 from '\x00\x08\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x09\x00\x00\x00' @ 0 : 0; will stop at '\x00\x08\x00\x00\x05' @ 792 : 1
-2025/11/17-15:29:10.444 5794 Compacting 1@0 + 1@1 files
-2025/11/17-15:29:10.447 5794 Generated table #10@0: 161 keys, 3002 bytes
-2025/11/17-15:29:10.447 5794 Compacted 1@0 + 1@1 files => 3002 bytes
-2025/11/17-15:29:10.450 5794 compacted to: files[ 0 1 1 0 0 0 0 ]
-2025/11/17-15:29:10.450 5794 Delete type=2 #9
-2025/11/17-15:29:10.451 5794 Manual compaction at level-0 from '\x00\x08\x00\x00\x05' @ 792 : 1 .. '\x00\x09\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/11/17-15:29:10.470 1d18 Level-0 table #12: started
-2025/11/17-15:29:10.475 1d18 Level-0 table #12: 1595 bytes OK
-2025/11/17-15:29:10.477 1d18 Delete type=2 #7
-2025/11/17-15:29:10.477 1d18 Delete type=0 #8
-2025/11/17-15:29:10.478 5794 Manual compaction at level-0 from '\x00\x09\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x0a\x00\x00\x00' @ 0 : 0; will stop at '\x00\x09\x00\x00\x05' @ 808 : 1
-2025/11/17-15:29:10.478 5794 Compacting 1@0 + 1@1 files
-2025/11/17-15:29:10.481 5794 Generated table #13@0: 163 keys, 3005 bytes
-2025/11/17-15:29:10.481 5794 Compacted 1@0 + 1@1 files => 3005 bytes
-2025/11/17-15:29:10.483 5794 compacted to: files[ 0 1 1 0 0 0 0 ]
-2025/11/17-15:29:10.484 5794 Delete type=2 #12
-2025/11/17-15:29:10.484 5794 Manual compaction at level-0 from '\x00\x09\x00\x00\x05' @ 808 : 1 .. '\x00\x0a\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/11/17-17:41:56.983 27b0 Reusing MANIFEST C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_orange-resonance-170715.postman.co_0.indexeddb.leveldb/MANIFEST-000001
+2025/11/17-17:41:56.983 27b0 Recovering log #11
+2025/11/17-17:41:56.984 27b0 Reusing old log C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_orange-resonance-170715.postman.co_0.indexeddb.leveldb/000011.log 
+2025/11/17-17:41:56.985 27b0 Delete type=2 #10
+2025/11/17-17:41:57.168 62c8 Level-0 table #16: started
+2025/11/17-17:41:57.172 62c8 Level-0 table #16: 914 bytes OK
+2025/11/17-17:41:57.175 62c8 Delete type=0 #11
+2025/11/17-17:41:57.176 62c8 Manual compaction at level-0 from '\x00\x0a\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x0b\x00\x00\x00' @ 0 : 0; will stop at '\x00\x0a\x00\x00\x05' @ 861 : 1
+2025/11/17-17:41:57.176 62c8 Compacting 1@0 + 1@1 files
+2025/11/17-17:41:57.180 62c8 Generated table #17@0: 171 keys, 3065 bytes
+2025/11/17-17:41:57.180 62c8 Compacted 1@0 + 1@1 files => 3065 bytes
+2025/11/17-17:41:57.183 62c8 compacted to: files[ 0 1 1 0 0 0 0 ]
+2025/11/17-17:41:57.183 62c8 Delete type=2 #16
+2025/11/17-17:41:57.184 27b0 Manual compaction at level-0 from '\x00\x0a\x00\x00\x05' @ 861 : 1 .. '\x00\x0b\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/11/17-17:41:57.185 27b0 Level-0 table #19: started
+2025/11/17-17:41:57.188 27b0 Level-0 table #19: 549 bytes OK
+2025/11/17-17:41:57.190 27b0 Delete type=2 #13
+2025/11/17-17:41:57.190 27b0 Delete type=0 #15
+2025/11/17-17:41:57.191 27b0 Manual compaction at level-0 from '\x00\x0b\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x0c\x00\x00\x00' @ 0 : 0; will stop at '\x00\x0b\x00\x00\x05' @ 877 : 1
+2025/11/17-17:41:57.191 27b0 Compacting 1@0 + 1@1 files
+2025/11/17-17:41:57.193 27b0 Generated table #20@0: 173 keys, 3106 bytes
+2025/11/17-17:41:57.193 27b0 Compacted 1@0 + 1@1 files => 3106 bytes
+2025/11/17-17:41:57.195 27b0 compacted to: files[ 0 1 1 0 0 0 0 ]
+2025/11/17-17:41:57.195 27b0 Delete type=2 #19
+2025/11/17-17:41:57.196 27b0 Manual compaction at level-0 from '\x00\x0b\x00\x00\x05' @ 877 : 1 .. '\x00\x0c\x00\x00\x00' @ 0 : 0; will stop at (end)

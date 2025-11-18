@@ -1,2 +1,3 @@
-2025/11/17-15:25:37.645 5f44 Creating DB C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\shared_proto_db\metadata since it was missing.
-2025/11/17-15:25:37.682 5f44 Reusing MANIFEST C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\shared_proto_db\metadata/MANIFEST-000001
+2025/11/17-21:49:49.537 7440 Reusing MANIFEST C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\shared_proto_db\metadata/MANIFEST-000001
+2025/11/17-21:49:49.538 7440 Recovering log #3
+2025/11/17-21:49:49.538 7440 Reusing old log C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\shared_proto_db\metadata/000003.log 

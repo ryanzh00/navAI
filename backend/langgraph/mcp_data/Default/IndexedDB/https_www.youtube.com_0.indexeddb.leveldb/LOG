@@ -1,3 +1,7 @@
-2025/11/17-15:27:02.907 5794 Reusing MANIFEST C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/MANIFEST-000001
-2025/11/17-15:27:02.907 5794 Recovering log #3
-2025/11/17-15:27:02.908 5794 Reusing old log C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/000003.log 
+2025/11/17-18:13:16.095 62c8 Reusing MANIFEST C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/11/17-18:13:16.096 62c8 Recovering log #3
+2025/11/17-18:13:16.097 62c8 Reusing old log C:\Users\ericm\CIS 4000\navAI\backend\langgraph\mcp_data\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/000003.log 
+2025/11/17-18:13:16.183 62c8 Level-0 table #5: started
+2025/11/17-18:13:16.190 62c8 Level-0 table #5: 17466 bytes OK
+2025/11/17-18:13:16.197 62c8 Delete type=0 #3
+2025/11/17-18:13:16.197 62c8 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
