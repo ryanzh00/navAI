@@ -163,4 +163,12 @@ export class OverlayManager {
       this.messageElement.textContent = message;
     }
   }
+
+  destroy() {
+    if (this.overlayElement) {
+      this.overlayElement.remove();
+      this.overlayElement = null;
+    }
+    this.messageElement = null;
+  }
 }
