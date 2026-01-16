@@ -74,19 +74,35 @@ class ChatState(TypedDict):
 # Chat model (OpenAI)
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-def reply_node(state: ChatState, *, user_id: str) -> ChatState:
+def reply_node(state: ChatState, *, user_id: str, page_content: dict | None = None) -> ChatState:
     window = state["messages"][-WINDOW:]
     last_user = next((m for m in reversed(window) if m.type == "human"), None)
     query = last_user.content if last_user else ""
     long_term = search_memories(user_id, query, k=TOP_K)
 
     sys = [SystemMessage(content="You are a concise, helpful assistant. Keep your replies short, easy to understand, and conversational. Avoid technical jargon.")]
+    
+    # Add long-term memory context if available
     if long_term:
         sys.append(SystemMessage(content="Relevant long-term context:\n- " + "\n- ".join(long_term)))
-
-    # Prefix the user query for reply_node
-    if query:
-        query = "Take a snapshot first to understand the state of the page first. " + query
+    
+    # Add page content as context if available (for non-agentic mode)
+    if page_content:
+        page_text = page_content.get("text", "")[:3000]  # Limit to 3000 chars
+        page_title = page_content.get("title", "")
+        page_url = page_content.get("url", "")
+        headings = page_content.get("headings", [])[:10]  # Limit to 10 headings
+        
+        page_context = f"Current page context:\n"
+        page_context += f"URL: {page_url}\n"
+        page_context += f"Title: {page_title}\n"
+        if headings:
+            page_context += f"Headings: {', '.join(headings)}\n"
+        if page_text:
+            page_context += f"Content preview: {page_text}\n"
+        page_context += "\nUse this page context to answer the user's question. Reference specific content from the page when relevant."
+        
+        sys.append(SystemMessage(content=page_context))
 
     ai = llm.invoke(sys + window[:-1] + [HumanMessage(content=query)] if query else sys + window)
     return {"messages": [AIMessage(content=ai.content)]}
@@ -214,13 +230,67 @@ Keep your replies short, friendly, and easy for non-technical users to understan
         final_messages = result.get("messages", [])
         print(f"\n[DEBUG] Agent execution completed. Total messages: {len(final_messages)}")
         final_ai_message = next((m for m in reversed(final_messages) if isinstance(m, AIMessage)), None)
-        final_text = final_ai_message.content if final_ai_message else str(result)
-        return {"messages": [AIMessage(content=final_text)]}
+        
+        # Extract text content, handling both string and dict responses
+        if final_ai_message:
+            content = final_ai_message.content
+            # If content is a dict (raw model response), extract the actual message text
+            if isinstance(content, dict):
+                # Try to extract message content from various possible structures
+                if 'model' in content and 'messages' in content['model']:
+                    messages = content['model']['messages']
+                    if messages:
+                        # Handle both dict and AIMessage objects
+                        first_msg = messages[0]
+                        if isinstance(first_msg, AIMessage):
+                            final_text = first_msg.content
+                        elif isinstance(first_msg, dict) and 'content' in first_msg:
+                            final_text = first_msg['content']
+                        else:
+                            final_text = str(first_msg)
+                    else:
+                        final_text = str(content)
+                elif 'content' in content:
+                    final_text = content['content']
+                else:
+                    final_text = str(content)
+            elif isinstance(content, str):
+                final_text = content
+            else:
+                final_text = str(content)
+        else:
+            final_text = "No response generated"
+        
+        # Check for errors in tool results
+        tool_results = [m for m in final_messages if hasattr(m, 'tool_call_id') and hasattr(m, 'content')]
+        has_errors = False
+        error_details = []
+        
+        for tool_result in tool_results:
+            result_content = str(tool_result.content) if hasattr(tool_result, 'content') else ""
+            # Check for common error indicators
+            if any(indicator in result_content.lower() for indicator in ['error', 'failed', 'exception', 'timeout', 'not found', 'could not']):
+                has_errors = True
+                if result_content:
+                    error_details.append(result_content[:200])  # Limit error detail length
+        
+        # Build the response message
+        if has_errors:
+            # Add error information to the response
+            error_summary = "\n\n⚠️ Task encountered some issues. " + (error_details[0] if error_details else "Please check the browser window for details.")
+            response_text = final_text + error_summary
+        else:
+            # Add success confirmation
+            success_confirmation = "\n\n✅ Task completed successfully!"
+            response_text = final_text + success_confirmation
+        
+        return {"messages": [AIMessage(content=response_text)]}
 
     except Exception as e:
         error_msg = str(e)
+        error_type = type(e).__name__
         print(f"\n[ERROR] MCP Node Error: {error_msg}")
-        print(f"[ERROR] Exception type: {type(e).__name__}")
+        print(f"[ERROR] Exception type: {error_type}")
 
         # Try to snapshot current page for debugging
         try:
@@ -234,7 +304,20 @@ Keep your replies short, friendly, and easy for non-technical users to understan
         except Exception as debug_error:
             print(f"[DEBUG] Could not capture snapshot: {debug_error}")
 
-        return {"messages": [AIMessage(content=f"Error: {error_msg}")]}
+        # Create user-friendly error message
+        if "timeout" in error_msg.lower():
+            friendly_error = "⛔ Task timed out. The browser operation took too long to complete. Please try again or check if the page is loading correctly."
+        elif "not found" in error_msg.lower() or "could not find" in error_msg.lower():
+            friendly_error = f"⛔ Could not find the requested element on the page. {error_msg[:200]}"
+        elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+            friendly_error = "⛔ Network error occurred. Please check your internet connection and try again."
+        else:
+            # Generic error message
+            friendly_error = f"⛔ Task failed: {error_msg[:300]}"
+            if len(error_msg) > 300:
+                friendly_error += "..."
+        
+        return {"messages": [AIMessage(content=friendly_error)]}
 
 def trim_node(state: ChatState) -> ChatState:
     return {"messages": state["messages"][-WINDOW:]}
@@ -244,7 +327,8 @@ builder = StateGraph(ChatState)
 
 def reply_wrapped(state: ChatState, config) -> ChatState:
     uid = config["configurable"].get("user_id", "anon")
-    return reply_node(state, user_id=uid)
+    page_content = config["configurable"].get("page_content", None)
+    return reply_node(state, user_id=uid, page_content=page_content)
 
 # Add all nodes
 builder.add_node("reply", reply_wrapped)
@@ -256,24 +340,21 @@ def route_node(state: ChatState) -> ChatState:
     """Router node - doesn't modify state, just passes through"""
     return state
 
-def route_message(state: ChatState) -> str:
-    """Route to MCP if message suggests browser automation, otherwise regular chat"""
-    last_user = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
-    if not last_user:
-        return "reply"
-
-    user_text = last_user.content.lower()
-    # Keywords that suggest browser automation tasks
-    browser_keywords = [
-        "click", "navigate", "browser", "page", "website", "web",
-        "screenshot", "scrape", "automate", "interact", "button",
-        "form", "fill", "submit", "pull request", "github", "make a pr",
-        "login", "logout", "type", "select", "tab", "snapshot"
-    ]
-
-    if any(keyword in user_text for keyword in browser_keywords):
+def route_message(state: ChatState, config=None) -> str:
+    """Route to MCP if agentic_mode is enabled, otherwise regular chat"""
+    # Always check agentic_mode first - this is the primary routing mechanism
+    agentic_mode = False
+    if config and "configurable" in config:
+        agentic_mode = config["configurable"].get("agentic_mode", False)
+    
+    # If agentic_mode is explicitly set (True or False), use it
+    # This ensures the toggle always controls routing
+    if agentic_mode:
+        print(f"[DEBUG] Routing to MCP (agentic_mode=True)")
         return "mcp"
-    return "reply"
+    else:
+        print(f"[DEBUG] Routing to reply (agentic_mode=False)")
+        return "reply"
 
 # Add router node
 builder.add_node("route", route_node)
@@ -297,10 +378,18 @@ checkpointer = None
 graph = None
 
 # ===== API =====
+class PageContentData(BaseModel):
+    url: str
+    title: str
+    text: str
+    headings: List[str]
+
 class ChatIn(BaseModel):
     user_id: str
     thread_id: str  # kept for your external caller's tracking; we don't spawn per-thread browsers in this file
     message: str
+    agentic_mode: bool = False  # Whether to use agentic mode (MCP tools)
+    page_content: PageContentData | None = None  # Page content for context in non-agentic mode
 
 class OpenIn(BaseModel):
     url: str | None = "https://github.com"
@@ -370,10 +459,31 @@ async def chat(inp: ChatIn):
     # Ensure MCP is alive
     await get_mcp_client_and_tools()
 
+    # Log the agentic_mode setting for debugging
+    print(f"[DEBUG] Chat request - agentic_mode: {inp.agentic_mode}, message: {inp.message[:50]}...")
+    if inp.page_content:
+        print(f"[DEBUG] Page content provided - URL: {inp.page_content.url}, Title: {inp.page_content.title}")
+
+    # Prepare config with page content for non-agentic mode
+    config_data = {
+        "thread_id": inp.thread_id,
+        "user_id": inp.user_id,
+        "agentic_mode": inp.agentic_mode
+    }
+    
+    # Add page content to config if provided (for non-agentic mode)
+    if inp.page_content:
+        config_data["page_content"] = {
+            "url": inp.page_content.url,
+            "title": inp.page_content.title,
+            "text": inp.page_content.text,
+            "headings": inp.page_content.headings
+        }
+
     # Use ainvoke for async graph execution (required for async nodes like mcp_node)
     result = await graph.ainvoke(
         {"messages": [HumanMessage(content=inp.message)]},
-        config={"configurable": {"thread_id": inp.thread_id, "user_id": inp.user_id}},
+        config={"configurable": config_data},
     )
 
     reply = [m for m in result["messages"] if isinstance(m, AIMessage)][-1].content

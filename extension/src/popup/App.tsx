@@ -22,7 +22,10 @@ const App: React.FC = () => {
 
     setState((prev: PopupState) => {
       const newHistory = [...prev.conversationHistory, newMessage];
-      // Don't save to storage - keep only in current session
+      // Save to storage for persistence
+      chrome.storage.local.set({ conversationHistory: newHistory }).catch((error) => {
+        console.error('Failed to save conversation history:', error);
+      });
       return {
         ...prev,
         conversationHistory: newHistory
@@ -34,8 +37,10 @@ const App: React.FC = () => {
     // Check connection status on mount
     checkConnection();
 
-    // Load saved settings
-    loadSettings();
+    // Load saved settings immediately
+    loadSettings().then(() => {
+      console.log('Settings loaded, current agenticMode:', state.agenticMode);
+    });
 
     // Listen for assistant responses from background
     const messageListener = (message: any) => {
@@ -71,10 +76,13 @@ const App: React.FC = () => {
 
   const loadSettings = async () => {
     try {
-      const result = await chrome.storage.local.get(['agenticMode']);
+      const result = await chrome.storage.local.get(['agenticMode', 'conversationHistory']);
+      const agenticMode = result.agenticMode !== undefined ? result.agenticMode : false;
+      console.log('Loaded settings - agenticMode:', agenticMode, 'from storage:', result.agenticMode);
       setState((prev: PopupState) => ({
         ...prev,
-        agenticMode: result.agenticMode || false
+        agenticMode: agenticMode,
+        conversationHistory: (result.conversationHistory as ConversationMessage[]) || []
       }));
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -87,11 +95,13 @@ const App: React.FC = () => {
 
   const handleAgenticModeToggle = async () => {
     const newMode = !state.agenticMode;
+    console.log('Toggling agentic mode from', state.agenticMode, 'to', newMode);
     setState((prev: PopupState) => ({ ...prev, agenticMode: newMode }));
 
     // Save to storage
     try {
       await chrome.storage.local.set({ agenticMode: newMode });
+      console.log('Saved agenticMode to storage:', newMode);
     } catch (error) {
       console.error('Failed to save agentic mode setting:', error);
     }
@@ -106,11 +116,19 @@ const App: React.FC = () => {
       // Add user message to history immediately
       addMessageToHistory('user', messageText);
 
+      // Double-check agenticMode from storage to ensure we have the latest value
+      const storageResult = await chrome.storage.local.get(['agenticMode']);
+      const currentAgenticMode = storageResult.agenticMode !== undefined ? storageResult.agenticMode : state.agenticMode;
+      
+      console.log('Current state.agenticMode:', state.agenticMode);
+      console.log('Storage agenticMode:', storageResult.agenticMode);
+      console.log('Using agenticMode:', currentAgenticMode);
+
       const message: UserMessage = {
         type: 'USER_MESSAGE',
         payload: {
           text: messageText,
-          agenticMode: state.agenticMode
+          agenticMode: currentAgenticMode
         }
       };
 
@@ -130,6 +148,10 @@ const App: React.FC = () => {
       ...prev,
       conversationHistory: []
     }));
+    // Clear from storage as well
+    chrome.storage.local.remove('conversationHistory').catch((error) => {
+      console.error('Failed to clear conversation history from storage:', error);
+    });
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -188,7 +210,7 @@ const App: React.FC = () => {
             className="toggle-input"
           />
           <span className="toggle-slider"></span>
-          Agentic Mode
+          Agentic Mode {state.agenticMode ? '(ON)' : '(OFF)'}
         </label>
       </div>
 

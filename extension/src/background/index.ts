@@ -69,7 +69,7 @@ async function getOrCreateThreadId(): Promise<string> {
 /**
  * Call backend API for AI processing
  */
-async function callBackendAPI(userMessage: string, _agenticMode: boolean): Promise<string> {
+async function callBackendAPI(userMessage: string, agenticMode: boolean, pageContent?: any): Promise<string> {
   try {
     // Generate unique IDs for user and thread
     const userId = await getOrCreateUserId();
@@ -84,6 +84,8 @@ async function callBackendAPI(userMessage: string, _agenticMode: boolean): Promi
         user_id: userId,
         thread_id: threadId,
         message: userMessage,
+        agentic_mode: agenticMode,
+        page_content: pageContent || null,
       }),
     });
 
@@ -128,10 +130,31 @@ async function handleUserMessage(message: UserMessage, sender: chrome.runtime.Me
     return;
   }
 
+  // Capture page content for non-agentic mode (to use as context)
+  let pageContent: any = null;
+  if (!message.payload.agenticMode && tabID) {
+    try {
+      // Request page content from content script
+      const pageContentResponse = await chrome.tabs.sendMessage(tabID, { type: 'GET_PAGE_CONTENT' });
+      if (pageContentResponse && pageContentResponse.pageData) {
+        pageContent = pageContentResponse.pageData;
+        console.log('Captured page content for context:', {
+          url: pageContent.url,
+          title: pageContent.title,
+          textLength: pageContent.text?.length || 0
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to capture page content:', error);
+      // Continue without page content if capture fails
+    }
+  }
+
   // Try to call backend API
   let responseText: string;
   try {
-    responseText = await callBackendAPI(message.payload.text, message.payload.agenticMode);
+    console.log('Calling backend API with agenticMode:', message.payload.agenticMode);
+    responseText = await callBackendAPI(message.payload.text, message.payload.agenticMode, pageContent);
     console.log('Received response from backend:', responseText);
   } catch (error) {
     console.error('Backend API failed, using fallback message:', error);

@@ -1,7 +1,7 @@
 // Content script for AI Desktop Assistant
 // Handles page content capture and overlay display
 
-import { AssistantMessage, ExtensionMessage, PageContent, ToggleOverlay } from '../types';
+import { AssistantMessage, PageContent, ToggleOverlay } from '../types';
 import { capturePageData } from './capture';
 import { OverlayManager } from './overlay';
 
@@ -11,23 +11,36 @@ console.log('NavAI content script loaded');
 const overlayManager = new OverlayManager();
 
 // Listen for messages from background script
-chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
   console.log('Content script received message:', message);
   
   switch (message.type) {
     case 'ASSISTANT_MESSAGE':
       handleAssistantMessage(message as AssistantMessage);
+      sendResponse({ success: true });
       break;
     
     case 'TOGGLE_OVERLAY':
       handleToggleOverlay(message as ToggleOverlay);
+      sendResponse({ success: true });
       break;
+    
+    case 'GET_PAGE_CONTENT':
+      // Handle page content request
+      try {
+        const pageData = capturePageData();
+        sendResponse({ pageData });
+      } catch (error) {
+        console.error('Failed to capture page content:', error);
+        sendResponse({ error: 'Failed to capture page content' });
+      }
+      return true; // Keep channel open for async response
     
     default:
       console.log('Unknown message type in content script:', message.type);
+      sendResponse({ success: true });
   }
   
-  sendResponse({ success: true });
   return true; // Keep message channel open
 });
 
