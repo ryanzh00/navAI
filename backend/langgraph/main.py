@@ -20,6 +20,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 # --- OpenAI (chat + embeddings) ---
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+import openai
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -57,8 +58,14 @@ def add_memories(user_id: str, docs: List[str], metadata: dict):
 def search_memories(user_id: str, query: str, k: int = TOP_K) -> List[str]:
     if not query.strip():
         return []
-    results = vstore.similarity_search(query, k=k, filter={"ns": ns_user(user_id)})
-    return [r.page_content for r in results]
+    try:
+        results = vstore.similarity_search(query, k=k, filter={"ns": ns_user(user_id)})
+        return [r.page_content for r in results]
+    except (openai.RateLimitError, openai.APIError, Exception) as e:
+        # Gracefully handle OpenAI API errors (quota, rate limits, etc.)
+        # Return empty list to allow the backend to continue functioning without memory search
+        print(f"Warning: Memory search failed: {e}")
+        return []
 
 # ===== LangGraph State =====
 class ChatState(TypedDict):
