@@ -149,7 +149,7 @@ async function handleUserMessage(message: UserMessage, sender: chrome.runtime.Me
     }
   };
 
-  // Send response to popup (for conversation history)
+  // Send response to popup (for conversation history - current session only)
   try {
     chrome.runtime.sendMessage(assistantResponse).catch(() => {
       // Popup might not be open, that's okay
@@ -157,7 +157,7 @@ async function handleUserMessage(message: UserMessage, sender: chrome.runtime.Me
   } catch (error) {
     // Ignore errors if popup is not open
   }
-
+  
   // Send response to content script
   if (tabID) {
     try {

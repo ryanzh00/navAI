@@ -22,10 +22,7 @@ const App: React.FC = () => {
 
     setState((prev: PopupState) => {
       const newHistory = [...prev.conversationHistory, newMessage];
-      // Save to storage (async, don't await)
-      chrome.storage.local.set({ conversationHistory: newHistory }).catch(() => {
-        // Ignore storage errors
-      });
+      // Don't save to storage - keep only in current session
       return {
         ...prev,
         conversationHistory: newHistory
@@ -37,9 +34,8 @@ const App: React.FC = () => {
     // Check connection status on mount
     checkConnection();
 
-    // Load saved settings and conversation history
+    // Load saved settings
     loadSettings();
-    loadConversationHistory();
 
     // Listen for assistant responses from background
     const messageListener = (message: any) => {
@@ -83,28 +79,6 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
-  };
-
-  const loadConversationHistory = async () => {
-    try {
-      const result = await chrome.storage.local.get(['conversationHistory']);
-      if (result.conversationHistory && Array.isArray(result.conversationHistory)) {
-        setState((prev: PopupState) => ({
-          ...prev,
-          conversationHistory: result.conversationHistory
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to load conversation history:', error);
-    }
-  };
-
-  const clearConversationHistory = async () => {
-    setState((prev: PopupState) => ({
-      ...prev,
-      conversationHistory: []
-    }));
-    await chrome.storage.local.remove('conversationHistory');
   };
 
   const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,10 +125,11 @@ const App: React.FC = () => {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSendMessage();
-    }
+  const clearConversationHistory = () => {
+    setState((prev: PopupState) => ({
+      ...prev,
+      conversationHistory: []
+    }));
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -162,18 +137,26 @@ const App: React.FC = () => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSendMessage();
+    }
+  };
+
   return (
     <div className="app">
       <div className="header">
         <h1>navAI</h1>
         {state.conversationHistory.length > 0 && (
-          <button
-            onClick={clearConversationHistory}
-            className="clear-button"
-            title="Clear conversation"
-          >
-            Clear
-          </button>
+          <div className="header-actions">
+            <button
+              onClick={clearConversationHistory}
+              className="clear-button"
+              title="Clear conversation"
+            >
+              Clear
+            </button>
+          </div>
         )}
       </div>
 
