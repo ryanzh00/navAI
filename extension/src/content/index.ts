@@ -5,7 +5,7 @@ import { AssistantMessage, ExtensionMessage, PageContent, ToggleOverlay } from '
 import { capturePageData } from './capture';
 import { OverlayManager } from './overlay';
 
-console.log('AI Desktop Assistant content script loaded');
+console.log('NavAI content script loaded');
 
 // Initialize overlay manager
 const overlayManager = new OverlayManager();
@@ -37,11 +37,6 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
 function handleAssistantMessage(message: AssistantMessage) {
   console.log('Displaying assistant message:', message.payload.text);
   overlayManager.show(message.payload.text);
-  
-  // Auto-hide after 10 seconds
-  setTimeout(() => {
-    overlayManager.hide();
-  }, 10000);
 }
 
 /**

@@ -1,6 +1,7 @@
 // Background service worker for AI Desktop Assistant
 // Handles message routing between popup and content scripts
 
+import { API_ENDPOINTS, generateId } from '../config';
 import { AssistantMessage, ExtensionMessage, UserMessage } from '../types';
 
 console.log('AI Desktop Assistant background script loaded');
@@ -31,56 +32,146 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender: chrome.
 });
 
 /**
+ * Check if a URL is injectable (content scripts can run on it)
+ */
+function isInjectableUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  const blockedSchemes = ['chrome:', 'chrome-extension:', 'moz-extension:', 'edge:', 'about:'];
+  return !blockedSchemes.some(scheme => url.startsWith(scheme));
+}
+
+/**
+ * Get or create a user ID (stored in chrome.storage)
+ */
+async function getOrCreateUserId(): Promise<string> {
+  const result = await chrome.storage.local.get(['userId']);
+  if (result.userId) {
+    return result.userId;
+  }
+  const userId = generateId();
+  await chrome.storage.local.set({ userId });
+  return userId;
+}
+
+/**
+ * Get or create a thread ID (stored in chrome.storage)
+ */
+async function getOrCreateThreadId(): Promise<string> {
+  const result = await chrome.storage.local.get(['threadId']);
+  if (result.threadId) {
+    return result.threadId;
+  }
+  const threadId = generateId();
+  await chrome.storage.local.set({ threadId });
+  return threadId;
+}
+
+/**
+ * Call backend API for AI processing
+ */
+async function callBackendAPI(userMessage: string, _agenticMode: boolean): Promise<string> {
+  try {
+    // Generate unique IDs for user and thread
+    const userId = await getOrCreateUserId();
+    const threadId = await getOrCreateThreadId();
+    
+    const response = await fetch(API_ENDPOINTS.chat, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        thread_id: threadId,
+        message: userMessage,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Backend API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.reply || 'No response from backend';
+  } catch (error) {
+    console.error('Backend API call failed:', error);
+    throw error;
+  }
+}
+
+/**
  * Handle user messages from popup
- * TODO: Integrate with backend API for AI processing
  */
 async function handleUserMessage(message: UserMessage, sender: chrome.runtime.MessageSender) {
   console.log('Processing user message:', message.payload);
   
-  // TODO: Send to backend API for AI processing
-  // const aiResponse = await callBackendAPI(message.payload);
-  
-  // For now, create a mock response
-  const mockResponse: AssistantMessage = {
-    type: 'ASSISTANT_MESSAGE',
-    payload: {
-      text: 'Assistant: Hello world! This is a mock response.',
-      timestamp: Date.now()
-    }
-  };
+  let tabID: number | undefined = sender.tab?.id;
+  let tabUrl: string | undefined = sender.tab?.url;
 
-  let tabID: number|undefined = sender.tab?.id;
-
+  // If no tab ID from sender (e.g., message from popup), get active tab
   if (!tabID) {
     try {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs[0]?.id) {
         tabID = tabs[0].id;
+        tabUrl = tabs[0].url;
       }
     } catch (error) {
       console.error('Failed to get active tab:', error);
     }
-  
   }
+
+  // Check if we can inject on this URL
+  if (!isInjectableUrl(tabUrl)) {
+    console.warn('Cannot inject content script on restricted URL:', tabUrl);
+    return;
+  }
+
+  // Try to call backend API
+  let responseText: string;
+  try {
+    responseText = await callBackendAPI(message.payload.text, message.payload.agenticMode);
+    console.log('Received response from backend:', responseText);
+  } catch (error) {
+    console.error('Backend API failed, using fallback message:', error);
+    // Fallback to error message if backend is unavailable
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    responseText = `Error: Could not connect to backend. ${errorMsg}\n\nMake sure the server is running at ${API_ENDPOINTS.chat}`;
+  }
+  
+  // Create response message
+  const assistantResponse: AssistantMessage = {
+    type: 'ASSISTANT_MESSAGE',
+    payload: {
+      text: responseText,
+      timestamp: Date.now()
+    }
+  };
   
   // Send response to content script
   if (tabID) {
     try {
       console.log('Sending message to tab:', tabID);
-      await chrome.tabs.sendMessage(tabID, mockResponse);
+      await chrome.tabs.sendMessage(tabID, assistantResponse);
       console.log('Sent response to content script');
     } catch (error) {
       console.error('Failed to send message to content script:', error);
       // Try to inject content script if it's not loaded
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tabID },
-          files: ['content.js']
-        });
-        console.log('Injected content script, retrying message...');
-        await chrome.tabs.sendMessage(tabID, mockResponse);
-      } catch (injectError) {
-        console.error('Failed to inject content script:', injectError);
+      // Only try if URL is injectable
+      if (isInjectableUrl(tabUrl)) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tabID },
+            files: ['content.js']
+          });
+          console.log('Injected content script, retrying message...');
+          // Wait a bit for script to initialize
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await chrome.tabs.sendMessage(tabID, assistantResponse);
+        } catch (injectError) {
+          console.error('Failed to inject content script:', injectError);
+        }
       }
     }
   } else {
