@@ -68,8 +68,10 @@ def search_memories(user_id: str, query: str, k: int = TOP_K) -> List[str]:
         return []
 
 # ===== LangGraph State =====
-class ChatState(TypedDict):
+class ChatState(TypedDict, total=False):
     messages: Annotated[List[AnyMessage], add_messages]
+    execution_plan: str  # Optional: stores the planned steps
+    goal_achieved: bool  # Whether the user's goal has been achieved
 
 # Chat model (OpenAI)
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -163,6 +165,82 @@ async def keep_mcp_alive():
         except Exception as e:
             print(f"[DEBUG] Keep-alive error (continuing): {e}")
 
+def enhance_user_intent(user_text: str) -> str:
+    """
+    Enhance user intent with better context and clarity.
+    Breaks down high-level goals into actionable steps.
+    """
+    enhancer_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    
+    enhancement_prompt = f"""User said: "{user_text}"
+
+Interpret this as a browser automation task. Clarify:
+1. What is the ultimate goal?
+2. What are the implicit steps needed?
+3. What should the final state look like?
+
+Examples:
+- User: "find pictures of dogs"
+  → Goal: Display image search results for "dogs"
+  → Steps: [Find search bar] → [Type "dogs"] → [Click search] → [Click Images tab]
+  → Final state: Image grid showing dog pictures
+
+- User: "buy a red shirt"
+  → Goal: Add a red shirt to shopping cart
+  → Steps: [Find search] → [Type "red shirt"] → [Click search] → [Click first result] → [Add to cart]
+  → Final state: Item in cart with confirmation
+
+- User: "login to my account"
+  → Goal: Successfully authenticate user
+  → Steps: [Find login link/button] → [Click it] → [Find username field] → [Type username] → [Find password field] → [Type password] → [Click login button]
+  → Final state: User logged in (check for profile/account indicator)
+
+Now interpret: "{user_text}"
+
+Provide a clear, step-by-step plan in natural language that the browser automation can follow.
+"""
+    
+    try:
+        enhanced = enhancer_llm.invoke([HumanMessage(content=enhancement_prompt)])
+        return enhanced.content
+    except Exception as e:
+        print(f"[WARNING] Intent enhancement failed: {e}, using original text")
+        return user_text
+
+def plan_task(user_text: str) -> str:
+    """
+    Break down user intent into specific, actionable steps.
+    """
+    planner_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    
+    planning_prompt = f"""Given this user request: "{user_text}"
+
+Break it down into 3-7 specific, actionable steps. Each step should be:
+- Clear and specific
+- In logical order
+- Achievable with browser automation tools (click, type, navigate, wait, etc.)
+
+Format as a numbered list. Example:
+User: "find pictures of dogs"
+Steps:
+1. Take a snapshot of the current page to see what's available
+2. Locate the search input field (look for search box, search bar, or input with placeholder "Search")
+3. Type "dogs" into the search field
+4. Click the search button or press Enter to submit
+5. Wait for search results to load and take a new snapshot
+6. Locate and click the "Images" tab, link, or filter button
+7. Verify that image results are displayed
+
+Now plan the steps for: "{user_text}"
+"""
+    
+    try:
+        plan = planner_llm.invoke([HumanMessage(content=planning_prompt)])
+        return plan.content
+    except Exception as e:
+        print(f"[WARNING] Task planning failed: {e}")
+        return f"1. Take a snapshot\n2. Complete the task: {user_text}"
+
 async def mcp_node(state: ChatState) -> ChatState:
     """
     MCP node that uses Playwright for browser automation (headed).
@@ -176,38 +254,83 @@ async def mcp_node(state: ChatState) -> ChatState:
     if not user_text:
         return {"messages": [AIMessage(content="(no user message to act on)")]}
 
-    # Prefix the user text for mcp_node
-    user_text = "Interact with this page to " + user_text
+    # Enhance user intent to understand the goal better
+    enhanced_intent = enhance_user_intent(user_text)
+    print(f"[DEBUG] Enhanced intent: {enhanced_intent}")
+    
+    # Get execution plan if available, otherwise create one
+    execution_plan = state.get("execution_plan", "")
+    if not execution_plan:
+        execution_plan = plan_task(user_text)
+        print(f"[DEBUG] Created execution plan:\n{execution_plan}")
 
+    # Build the instruction with plan context
+    instruction = f"""Goal: {enhanced_intent}
+
+Execution Plan:
+{execution_plan}
+
+Now execute this plan step by step. After each major action, verify progress toward the goal."""
+    
     tools_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    # Enhanced system prompt to ensure proper Playwright workflow
+    # Enhanced system prompt with intelligent reasoning
     agent = create_agent(
         model=tools_llm,
         tools=_mcp_tools,
-        system_prompt="""You are a browser automation assistant using Playwright MCP.
+        system_prompt="""You are an intelligent browser automation assistant using Playwright MCP.
+
+CORE PRINCIPLES:
+1. UNDERSTAND INTENT: Break down user requests into clear, actionable steps
+   - "find pictures of dogs" → [1] Find search bar, [2] Type "dogs", [3] Click search, [4] Click "Images" tab/filter
+   - "buy a red shirt" → [1] Find search, [2] Type "red shirt", [3] Click search, [4] Click first result, [5] Add to cart
+   
+2. ELEMENT DISCOVERY STRATEGY (in priority order):
+   - Search by visible text/label (most reliable)
+   - Search by ARIA role (button, searchbox, link, etc.)
+   - Search by semantic HTML (input[type="search"], button, a[href])
+   - Search by placeholder text
+   - Search by nearby text context
+   
+3. WORKFLOW PATTERN:
+   a) ALWAYS start with browser_snapshot to see current page state
+   b) Analyze the snapshot to understand page structure
+   c) Identify target elements using multiple strategies
+   d) Execute actions (click, type, etc.)
+   e) Wait for page changes, then snapshot again
+   f) Verify the action succeeded before proceeding
+   
+4. ERROR RECOVERY:
+   - If element not found, try alternative selectors/strategies
+   - If action fails, wait longer and retry
+   - If page seems stuck, take a new snapshot
+   - If goal unclear, break it into smaller sub-tasks
+   
+5. VALIDATION:
+   - After each major action, verify the result matches the goal
+   - Check if page content changed as expected
+   - Confirm you're making progress toward the user's goal
+   
+6. COMMUNICATION:
+   - Explain what you're doing in simple terms
+   - Report progress: "Found the search bar", "Typing 'dogs'", "Clicking Images tab"
+   - If stuck, explain what you're trying and why
 
 RULES:
 - ALWAYS call browser_snapshot right before interacting so refs are fresh.
 - Immediately use refs from the most recent browser_snapshot with browser_click/browser_type.
 - Do not reuse old refs after a new snapshot.
+- Do not reload the page unless explicitly asked to navigate.
+- If the page URL is about:blank or there are no open pages, call browser_navigate first.
 
-TYPICAL PLAN:
-- ALWAYS call browser_snapshot right before interacting so refs are fresh.
-1) Do not reload the page before the query. Do not navigate unless the current query is to navigate. 
-2) Call browser_navigate if there are no open pages or the URL is about:blank
-3) browser_wait_for 
-4) browser_snapshot
-5) Interact using refs (browser_click, browser_type, etc.)
-6) If page changes, repeat wait → snapshot → interact.
-Keep your replies short, friendly, and easy for non-technical users to understand. Avoid technical jargon and summarize whenever possible.
-"""
+Remember: Think step-by-step, verify each action, and always use fresh snapshots before interacting."""
     )
 
     # Execute and stream logs to server stdout (optional)
     try:
         print(f"\n[DEBUG] Starting agent execution for: {user_text}\n")
-        messages_so_far = [HumanMessage(content=user_text)]
+        print(f"[DEBUG] Execution plan:\n{execution_plan}\n")
+        messages_so_far = [HumanMessage(content=instruction)]
         result = None
         async for chunk in agent.astream({"messages": messages_so_far}):
             for key, value in chunk.items():
@@ -319,6 +442,53 @@ Keep your replies short, friendly, and easy for non-technical users to understan
         
         return {"messages": [AIMessage(content=friendly_error)]}
 
+def plan_task_node(state: ChatState) -> ChatState:
+    """
+    Planning node: Break down user intent into actionable steps before execution.
+    """
+    last_user = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
+    if not last_user:
+        return state
+    
+    user_text = last_user.content.strip()
+    if not user_text:
+        return state
+    
+    # Create execution plan
+    execution_plan = plan_task(user_text)
+    
+    # Add plan to state
+    plan_message = SystemMessage(content=f"Execution Plan:\n{execution_plan}")
+    
+    return {
+        "messages": state["messages"] + [plan_message],
+        "execution_plan": execution_plan,
+        "goal_achieved": False
+    }
+
+def validate_node(state: ChatState) -> ChatState:
+    """
+    Validation node: Check if the goal has been achieved.
+    For now, we'll mark it as achieved if no errors occurred.
+    In the future, this could analyze the final page state.
+    """
+    # Check for errors in the last messages
+    recent_messages = state["messages"][-5:]  # Check last 5 messages
+    has_errors = False
+    
+    for msg in recent_messages:
+        if isinstance(msg, AIMessage):
+            content = str(msg.content).lower()
+            if any(indicator in content for indicator in ['error', 'failed', 'could not', 'not found', 'timeout']):
+                has_errors = True
+                break
+    
+    goal_achieved = not has_errors
+    
+    return {
+        "goal_achieved": goal_achieved
+    }
+
 def trim_node(state: ChatState) -> ChatState:
     return {"messages": state["messages"][-WINDOW:]}
 
@@ -334,6 +504,8 @@ def reply_wrapped(state: ChatState, config) -> ChatState:
 builder.add_node("reply", reply_wrapped)
 builder.add_node("trim", trim_node)
 builder.add_node("mcp", mcp_node)  # MCP node for browser automation
+builder.add_node("plan", plan_task_node)  # Planning node for task decomposition
+builder.add_node("validate", validate_node)  # Validation node to check goal achievement
 
 # Create a router node to decide: use MCP for browser tasks, regular chat otherwise
 def route_node(state: ChatState) -> ChatState:
@@ -359,18 +531,22 @@ def route_message(state: ChatState, config=None) -> str:
 # Add router node
 builder.add_node("route", route_node)
 
-# Set up routing - START -> route -> (mcp or reply) -> trim -> END
+# Set up routing - START -> route -> (plan -> mcp or reply) -> validate -> trim -> END
 builder.set_entry_point("route")
 builder.add_conditional_edges(
     "route",
     route_message,
     {
-        "mcp": "mcp",
-        "reply": "reply"
+        "mcp": "plan",  # For agentic mode: plan first, then execute
+        "reply": "reply"  # For non-agentic mode: direct to reply
     }
 )
-builder.add_edge("mcp", "trim")   # MCP -> trim -> END
-builder.add_edge("reply", "trim") # Reply -> trim -> END
+# Planning -> MCP execution -> Validation -> Trim
+builder.add_edge("plan", "mcp")
+builder.add_edge("mcp", "validate")
+builder.add_edge("validate", "trim")
+# Direct path for non-agentic mode
+builder.add_edge("reply", "trim")
 builder.add_edge("trim", END)
 
 # Initialize checkpointer and graph (will be set up in lifespan)
