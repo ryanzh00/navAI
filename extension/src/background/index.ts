@@ -48,29 +48,43 @@ async function handleUserMessage(message: UserMessage, sender: chrome.runtime.Me
       timestamp: Date.now()
     }
   };
+
+  let tabID: number|undefined = sender.tab?.id;
+
+  if (!tabID) {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0]?.id) {
+        tabID = tabs[0].id;
+      }
+    } catch (error) {
+      console.error('Failed to get active tab:', error);
+    }
+  
+  }
   
   // Send response to content script
-  if (sender.tab?.id) {
+  if (tabID) {
     try {
-      console.log('Sending message to tab:', sender.tab.id);
-      await chrome.tabs.sendMessage(sender.tab.id, mockResponse);
+      console.log('Sending message to tab:', tabID);
+      await chrome.tabs.sendMessage(tabID, mockResponse);
       console.log('Sent response to content script');
     } catch (error) {
       console.error('Failed to send message to content script:', error);
       // Try to inject content script if it's not loaded
       try {
         await chrome.scripting.executeScript({
-          target: { tabId: sender.tab.id },
+          target: { tabId: tabID },
           files: ['content.js']
         });
         console.log('Injected content script, retrying message...');
-        await chrome.tabs.sendMessage(sender.tab.id, mockResponse);
+        await chrome.tabs.sendMessage(tabID, mockResponse);
       } catch (injectError) {
         console.error('Failed to inject content script:', injectError);
       }
     }
   } else {
-    console.error('No tab ID found in sender');
+    console.error('No tab ID found - cannot send message to content script');
   }
 }
 
