@@ -53,4 +53,13 @@ export interface PopupState {
   message: string;
   agenticMode: boolean;
   isConnected: boolean;
+  conversationHistory: ConversationMessage[];
+}
+
+// Conversation message types for popup history
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: number;
 }

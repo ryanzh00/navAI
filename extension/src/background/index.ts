@@ -148,7 +148,16 @@ async function handleUserMessage(message: UserMessage, sender: chrome.runtime.Me
       timestamp: Date.now()
     }
   };
-  
+
+  // Send response to popup (for conversation history)
+  try {
+    chrome.runtime.sendMessage(assistantResponse).catch(() => {
+      // Popup might not be open, that's okay
+    });
+  } catch (error) {
+    // Ignore errors if popup is not open
+  }
+
   // Send response to content script
   if (tabID) {
     try {

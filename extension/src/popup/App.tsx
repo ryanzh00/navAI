@@ -1,21 +1,67 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentTab, sendToBackground } from '../shared/messaging';
-import { PopupState, UserMessage } from '../types';
+import { ConversationMessage, PopupState, UserMessage } from '../types';
 
 const App: React.FC = () => {
   const [state, setState] = useState<PopupState>({
     message: '',
     agenticMode: false,
-    isConnected: false
+    isConnected: false,
+    conversationHistory: []
   });
+
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  const addMessageToHistory = useCallback((role: 'user' | 'assistant', text: string, timestamp?: number) => {
+    const newMessage: ConversationMessage = {
+      id: `msg-${Date.now()}-${Math.random()}`,
+      role,
+      text,
+      timestamp: timestamp || Date.now()
+    };
+
+    setState((prev: PopupState) => {
+      const newHistory = [...prev.conversationHistory, newMessage];
+      // Save to storage (async, don't await)
+      chrome.storage.local.set({ conversationHistory: newHistory }).catch(() => {
+        // Ignore storage errors
+      });
+      return {
+        ...prev,
+        conversationHistory: newHistory
+      };
+    });
+  }, []);
 
   useEffect(() => {
     // Check connection status on mount
     checkConnection();
 
-    // Load saved settings
+    // Load saved settings and conversation history
     loadSettings();
-  }, []);
+    loadConversationHistory();
+
+    // Listen for assistant responses from background
+    const messageListener = (message: any) => {
+      if (message.type === 'ASSISTANT_MESSAGE') {
+        addMessageToHistory('assistant', message.payload.text, message.payload.timestamp);
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(messageListener);
+
+    // Cleanup
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+    };
+  }, [addMessageToHistory]);
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [state.conversationHistory]);
 
   const checkConnection = async () => {
     try {
@@ -39,6 +85,28 @@ const App: React.FC = () => {
     }
   };
 
+  const loadConversationHistory = async () => {
+    try {
+      const result = await chrome.storage.local.get(['conversationHistory']);
+      if (result.conversationHistory && Array.isArray(result.conversationHistory)) {
+        setState((prev: PopupState) => ({
+          ...prev,
+          conversationHistory: result.conversationHistory
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to load conversation history:', error);
+    }
+  };
+
+  const clearConversationHistory = async () => {
+    setState((prev: PopupState) => ({
+      ...prev,
+      conversationHistory: []
+    }));
+    await chrome.storage.local.remove('conversationHistory');
+  };
+
   const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setState((prev: PopupState) => ({ ...prev, message: e.target.value }));
   };
@@ -58,11 +126,16 @@ const App: React.FC = () => {
   const handleSendMessage = async () => {
     if (!state.message.trim()) return;
 
+    const messageText = state.message.trim();
+
     try {
+      // Add user message to history immediately
+      addMessageToHistory('user', messageText);
+
       const message: UserMessage = {
         type: 'USER_MESSAGE',
         payload: {
-          text: state.message.trim(),
+          text: messageText,
           agenticMode: state.agenticMode
         }
       };
@@ -84,17 +157,42 @@ const App: React.FC = () => {
     }
   };
 
+  const formatTimestamp = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div className="app">
       <div className="header">
         <h1>navAI</h1>
+        {state.conversationHistory.length > 0 && (
+          <button
+            onClick={clearConversationHistory}
+            className="clear-button"
+            title="Clear conversation"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
-      <div className="chat-container">
-        {state.message && (
-          <div className="chat-message user">
-            {state.message}
+      <div className="chat-container" ref={chatContainerRef}>
+        {state.conversationHistory.length === 0 ? (
+          <div className="chat-empty">
+            <p>Start a conversation with navAI</p>
           </div>
+        ) : (
+          state.conversationHistory.map((msg) => (
+            <div key={msg.id} className={`chat-message ${msg.role}`}>
+              <div className="chat-message-content">
+                {msg.text}
+              </div>
+              <div className="chat-message-time">
+                {formatTimestamp(msg.timestamp)}
+              </div>
+            </div>
+          ))
         )}
       </div>
 

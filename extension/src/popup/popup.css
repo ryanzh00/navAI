@@ -12,15 +12,39 @@
 }
 
 .header {
-  text-align: center;
-  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
+  text-align: center;
 }
 
 .header h1 {
-  margin: 0 0 10px 0;
+  flex: 1;
+  margin: 0;
   font-size: 18px;
   font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.clear-button {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.clear-button:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .status {
@@ -159,16 +183,37 @@
 }
 
 .chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 12px;
-  margin-bottom: 10px;
-  border-radius: 10px;
-  font-size: 14px;
+  border-radius: 8px;
+  max-width: 85%;
+  word-wrap: break-word;
 }
 
 .chat-message.user {
-  background: rgba(255,255,255,0.7);
-  color: #333;
   align-self: flex-end;
+  background: rgba(255,255,255,0.9);
+  color: #333;
+}
+
+.chat-message.assistant {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.chat-message-content {
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.chat-message-time {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-top: 2px;
 }
 
 .input-bar {
@@ -185,4 +230,17 @@
   padding: 12px;
   overflow-y: auto;
   max-height: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.chat-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
 }
