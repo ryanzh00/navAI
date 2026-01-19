@@ -1,27 +1,33 @@
 const fs = require('fs');
 const path = require('path');
 
-const root = path.resolve(__dirname, '..'); // extension/
-const dist = path.join(root, 'dist');
-const files = ['manifest.json', 'popup.html'];
+const rootDir = path.resolve(__dirname, '..');
+const distDir = path.join(rootDir, 'dist');
 
-if (!fs.existsSync(dist)) {
-  console.warn('dist directory does not exist — skipping copy');
-  process.exit(0);
+// Ensure dist directory exists
+if (!fs.existsSync(distDir)) {
+  fs.mkdirSync(distDir, { recursive: true });
 }
 
-files.forEach((f) => {
-  const src = path.join(root, f);
-  const dest = path.join(dist, f);
-  try {
-    if (!fs.existsSync(src)) {
-      console.warn(`Source not found, skipping: ${src}`);
-      return;
+const filesToCopy = [
+  { src: 'manifest.json', dest: 'manifest.json' },
+  // popup.html is handled by Vite
+  // { src: 'src/popup/popup.html', dest: 'popup.html' },
+  // popup.css is likely handled by Vite too if imported, but we'll leave it if it's static
+  { src: 'src/popup/popup.css', dest: 'popup.css' }
+];
+
+filesToCopy.forEach(file => {
+  const srcPath = path.join(rootDir, file.src);
+  const destPath = path.join(distDir, file.dest);
+
+  if (fs.existsSync(srcPath)) {
+    fs.copyFileSync(srcPath, destPath);
+    console.log(`Copied ${file.src} -> dist/${file.dest}`);
+  } else {
+    // Only log if it's not the popup.html we just commented out
+    if (!file.src.includes('popup.html')) {
+        console.log(`Source not found, skipping: ${srcPath}`);
     }
-    fs.copyFileSync(src, dest);
-    console.log(`Copied ${f} -> dist/${f}`);
-  } catch (err) {
-    console.error(`Failed to copy ${f}:`, err);
-    process.exitCode = 1;
   }
 });
