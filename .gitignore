@@ -177,3 +177,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+mcp_data/
