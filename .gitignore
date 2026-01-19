@@ -183,3 +183,4 @@ mcp_data/
 chroma/
 backend/langgraph/mcp_data/
 backend/langgraph/chroma/
+backend/langgraph/memory.sqlite
