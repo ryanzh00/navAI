@@ -6,12 +6,15 @@ import { PageData } from '../types';
  * Extract text content from the page
  */
 export function extractPageText(): string {
-  // Remove script and style elements
-  const scripts = document.querySelectorAll('script, style, nav, header, footer');
+  // Clone the body to avoid modifying the actual page DOM
+  const bodyClone = document.body.cloneNode(true) as HTMLElement;
+  
+  // Remove script, style, nav, header, and footer elements from the clone only
+  const scripts = bodyClone.querySelectorAll('script, style, nav, header, footer');
   scripts.forEach(el => el.remove());
   
-  // Get all text content
-  const textContent = document.body.innerText || document.body.textContent || '';
+  // Get all text content from the clone
+  const textContent = bodyClone.innerText || bodyClone.textContent || '';
   
   // Clean up whitespace
   return textContent

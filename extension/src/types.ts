@@ -10,6 +10,7 @@ export interface UserMessage extends Message {
   payload: {
     text: string;
     agenticMode: boolean;
+    tabId?: number; // Optional tab ID from popup
   };
 }
 
@@ -38,7 +39,12 @@ export interface ToggleOverlay extends Message {
   };
 }
 
-export type ExtensionMessage = UserMessage | AssistantMessage | PageContent | ToggleOverlay;
+export interface CheckNavaiSpawned extends Message {
+  type: 'CHECK_NAVAI_SPAWNED';
+  payload?: {};
+}
+
+export type ExtensionMessage = UserMessage | AssistantMessage | PageContent | ToggleOverlay | CheckNavaiSpawned;
 
 // Content script types
 export interface PageData {
@@ -53,4 +59,13 @@ export interface PopupState {
   message: string;
   agenticMode: boolean;
   isConnected: boolean;
+  conversationHistory: ConversationMessage[];
+}
+
+// Conversation message types for popup history
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: number;
 }
