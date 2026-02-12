@@ -1,0 +1,13 @@
+cd backend/langgraph
+
+# Create venv
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate
+
+# Install all packages
+pip install -r requirements.txt
+
+# Now run with python -m uvicorn
+python -m uvicorn main:app --host 127.0.0.1 --port 8000

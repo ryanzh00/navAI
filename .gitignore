@@ -5,6 +5,20 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 
+
+# Database files (memory and vector stores)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+backend/langgraph/memory.sqlite*
+backend/langgraph/chroma.sqlite3
+backend/langgraph/*.sqlite*
+
 # Build outputs
 dist/
 build/
@@ -183,3 +197,5 @@ mcp_data/
 chroma/
 backend/langgraph/mcp_data/
 backend/langgraph/chroma/
+backend/langgraph/memory.sqlite
+backend/langgraph/dmg_staging/navAI/
