@@ -28,6 +28,8 @@ const App: React.FC = () => {
     additional_info: '',
   });
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const isRecordingRef = useRef(false);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +70,13 @@ const App: React.FC = () => {
     const messageListener = (message: any) => {
       if (message.type === 'ASSISTANT_MESSAGE') {
         addMessageToHistory('assistant', message.payload.text, message.payload.timestamp);
+      }
+      if (message.type === 'SPEECH_TRANSCRIPT') {
+        setState(prev => ({ ...prev, message: prev.message + message.text }));
+      }
+      if (message.type === 'SPEECH_RECOGNITION_ENDED' || message.type === 'SPEECH_RECOGNITION_ERROR') {
+        isRecordingRef.current = false;
+        setIsRecording(false);
       }
     };
 
@@ -375,6 +384,116 @@ const App: React.FC = () => {
     }
   };
 
+  const handleToggleRecording = async () => {
+    // If currently recording, stop by sending a message to the content page
+    if (isRecording) {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabId = tabs[0]?.id;
+        if (tabId) {
+          await chrome.tabs.sendMessage(tabId, { type: 'STOP_SPEECH_RECOGNITION' });
+        }
+      } catch (e) {
+        console.error('Failed to stop speech recognition:', e);
+      }
+      return;
+    }
+
+    // Start recording by injecting speech recognition into the active tab
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabId = tabs[0]?.id;
+      if (!tabId) {
+        console.error('No active tab found for speech recognition.');
+        return;
+      }
+
+      // Inject the speech recognition script into the page
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          // If already running, stop first
+          if ((window as any).__navai_recognition) {
+            (window as any).__navai_recognition.stop();
+            (window as any).__navai_recognition = null;
+          }
+
+          const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+          if (!SpeechRecognitionCtor) {
+            chrome.runtime.sendMessage({ type: 'SPEECH_RECOGNITION_ERROR', error: 'not-supported' });
+            return;
+          }
+
+          const recognition = new SpeechRecognitionCtor();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'en-US';
+
+          (window as any).__navai_recognition = recognition;
+
+          recognition.onresult = (event: any) => {
+            let finalTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript;
+              }
+            }
+            if (finalTranscript) {
+              chrome.runtime.sendMessage({ type: 'SPEECH_TRANSCRIPT', text: finalTranscript });
+            }
+          };
+
+          recognition.onerror = (event: any) => {
+            console.error('Speech recognition error:', event.error);
+            if (event.error !== 'aborted' && event.error !== 'no-speech') {
+              chrome.runtime.sendMessage({ type: 'SPEECH_RECOGNITION_ENDED' });
+              (window as any).__navai_recognition = null;
+            }
+          };
+
+          recognition.onend = () => {
+            // Only send ended if we're not restarting
+            if (!(window as any).__navai_recognition) return;
+            // Try to restart to keep listening
+            try {
+              recognition.start();
+            } catch (e) {
+              chrome.runtime.sendMessage({ type: 'SPEECH_RECOGNITION_ENDED' });
+              (window as any).__navai_recognition = null;
+            }
+          };
+
+          // Listen for stop messages from the popup
+          const stopListener = (message: any) => {
+            if (message.type === 'STOP_SPEECH_RECOGNITION') {
+              (window as any).__navai_recognition = null;
+              recognition.stop();
+              chrome.runtime.onMessage.removeListener(stopListener);
+              chrome.runtime.sendMessage({ type: 'SPEECH_RECOGNITION_ENDED' });
+            }
+          };
+          chrome.runtime.onMessage.addListener(stopListener);
+
+          try {
+            recognition.start();
+          } catch (e) {
+            chrome.runtime.sendMessage({ type: 'SPEECH_RECOGNITION_ERROR', error: 'start-failed' });
+            (window as any).__navai_recognition = null;
+          }
+        }
+      });
+
+      isRecordingRef.current = true;
+      setIsRecording(true);
+    } catch (e) {
+      console.error('Failed to start speech recognition:', e);
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    }
+  };
+
   // Show loading state
   if (isLoading) {
     return (
@@ -631,6 +750,13 @@ const App: React.FC = () => {
           placeholder="Type a message..."
           className="message-input"
         />
+        <button
+          onClick={handleToggleRecording}
+          className={`send-button mic-button ${isRecording ? 'recording' : ''}`}
+          title={isRecording ? 'Stop recording' : 'Start recording'}
+        >
+          {isRecording ? '🛑' : '🎤'}
+        </button>
         <button
           onClick={handleSendMessage}
           disabled={!state.message.trim()}

@@ -175,9 +175,47 @@
 }
 
 .send-button:disabled {
-  background: rgba(255, 255, 255, 0.3);
-  color: #666;
+  background: #c0c0c0;
+  color: #ffffff;
   cursor: not-allowed;
+  box-shadow: none;
+}
+
+.mic-button {
+  padding: 10px;
+  min-width: auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.mic-button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.mic-button.recording {
+  background-color: #ff4136;
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 65, 54, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 65, 54, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 65, 54, 0);
+  }
 }
 
 .info {
